@@ -1,26 +1,3 @@
-"""Experiment 1 baselines for the 86-dimensional energy-storage design.
-
-The objective, bounds and seed protocol match PPGP.py. TMM is not included.
-Algorithm names follow S1_baseline_1.json / Figure 1 of the paper.
-
-Where each setting comes from
------------------------------
-TurBO   PPGP.py  run_pure_turbo, botorch_turbom_optimize(algo_mode="pure")
-        Recorded budget: 300 evaluations (S1_baseline_1.json "TurBO").
-PCABO   Mask.py / system_test_table3.py  run_pca_bo  (code name PCA-AxBO)
-        Recorded budget: 400 evaluations.
-REMBO   Mask.py / system_test_table3.py  run_rembo_bo (code name REMBO-AxBO)
-        Recorded budget: 400 evaluations.
-SAASBO  No runner survived in the repo. The loop below is inferred:
-        S1_baseline_1.json fixes the budget (100) and the Sobol start
-        (the same 10 points as TurBO, seed = 40 + trial_id). The 11th
-        evaluation already differs and the curve is not padded, so each
-        later step is one global proposal (q=1), not a batch and not a
-        trust region. The acquisition optimizer matches the TurBO loop
-        from the same experiment. NUTS and the SAAS prior are the BoTorch
-        defaults; the paper dropped SAASBO afterwards because that fit is
-        too expensive, which is what those defaults cost.
-"""
 
 import json
 import logging
@@ -59,16 +36,11 @@ from torch.quasirandom import SobolEngine
 from BuildGraph import build_physics_graph, evaluate_system_FoM
 
 
-# ---------------------------------------------------------------------------
-# Collected configuration. The runners below read these dictionaries.
-# ---------------------------------------------------------------------------
+
 
 EXPERIMENT = {
     "n_trials": 100,
     "global_seed": 40,
-    # Lengths of the curves stored in S1_baseline_1.json. They are not equal:
-    # SAASBO was stopped at 100 because the NUTS fit is much more expensive,
-    # and PCABO / REMBO were continued to 400.
     "budgets": {
         "TurBO": 300,
         "PCABO": 400,
@@ -77,7 +49,7 @@ EXPERIMENT = {
     },
 }
 
-# Shared with PPGP.generate_bounds. Nominal value v is searched in [0.85 v, 1.15 v].
+
 BOUNDS = {
     "relative_half_width": 0.15,
     "zero_value_box": (1e-6, 0.1),
@@ -96,7 +68,7 @@ BOUNDS = {
     "invalid_fom": -9999.0,
 }
 
-# PPGP.py pure TurBO. At a budget of 300, n_init = min(10, 300 // 2) = 10.
+
 TURBO = {
     "m": 2,
     "n_init_cap": 10,
@@ -111,7 +83,6 @@ TURBO = {
     "q": 1,
 }
 
-# Mask.py run_pca_bo. For D = 86 this is a 43-dimensional PCA of the unit cube.
 PCABO = {
     "embedding_divisor": 2,
     "min_embedding": 2,
@@ -129,14 +100,7 @@ REMBO = {
     "projection_clip": (-1.0, 1.0),
 }
 
-# Inferred SAASBO. Keys are read by run_saasbo.
-# From S1_baseline_1.json: n_init=10, q=1, budget=100 (see EXPERIMENT).
-# From the TurBO loop in PPGP.py: restarts and raw samples.
-# From fit_fully_bayesian_model_nuts / SaasPyroModel, left at the library
-# default: NUTS 512 / 256 / 16, tree depth 6, Matern-5/2, global shrinkage
-# Half-Cauchy(0.1), outputscale Gamma(2.0, 0.15). The outputscale prior is
-# the same Gamma(2.0, 0.15) PPGP hardcodes on its ScaleKernel.
-# train_yvar=1e-6 because the FoM is deterministic.
+
 SAASBO = {
     "n_init": 10,
     "q": 1,
@@ -230,10 +194,6 @@ def _observe(tracker, val):
     return val
 
 
-# ---------------------------------------------------------------------------
-# Ax GP-EI used by PCABO and REMBO. Search coordinates are normalized to [0, 1]
-# inside Ax; obj_func receives points in the caller's native bounds.
-# ---------------------------------------------------------------------------
 
 def ax_bo_optimize(obj_func, bounds, max_evals, seed=None, initial_x_norm=None, initial_y=None):
     from ax.service.ax_client import AxClient
@@ -268,9 +228,7 @@ def ax_bo_optimize(obj_func, bounds, max_evals, seed=None, initial_x_norm=None, 
         ax_client.complete_trial(trial_index=trial_index, raw_data=val)
 
 
-# ---------------------------------------------------------------------------
-# TurBO-m, pure data-driven branch from PPGP.py
-# ---------------------------------------------------------------------------
+
 
 def run_turbo(full_params, full_bounds, base_state, total_iters, seed):
     tracker = _new_tracker()
@@ -394,9 +352,6 @@ def run_turbo(full_params, full_bounds, base_state, total_iters, seed):
     return tracker
 
 
-# ---------------------------------------------------------------------------
-# PCABO: PCA on the unit-cube design, then Ax BO inside a 2-sigma latent box
-# ---------------------------------------------------------------------------
 
 def run_pcabo(full_params, full_bounds, base_state, total_iters, seed):
     tracker = _new_tracker()
@@ -452,9 +407,6 @@ def run_pcabo(full_params, full_bounds, base_state, total_iters, seed):
     return tracker
 
 
-# ---------------------------------------------------------------------------
-# REMBO: random linear embedding, box [-sqrt(d_e), sqrt(d_e)], Ax BO
-# ---------------------------------------------------------------------------
 
 def run_rembo(full_params, full_bounds, base_state, total_iters, seed):
     tracker = _new_tracker()
@@ -481,14 +433,7 @@ def run_rembo(full_params, full_bounds, base_state, total_iters, seed):
     return tracker
 
 
-# ---------------------------------------------------------------------------
-# SAASBO. Global fully Bayesian SAAS GP on the unit cube.
-# The Sobol start is shared with TurBO. After that, each iteration refits
-# with NUTS and picks one point by qLogEI. Analytic EI is the acquisition
-# used everywhere else in this project, but it cannot take the MCMC batch
-# dimension of SaasFullyBayesianSingleTaskGP, so the log-EI Monte Carlo
-# version is the one that actually runs.
-# ---------------------------------------------------------------------------
+
 
 def _standardize_observations(Y):
     valid_mask = Y > -9000.0
